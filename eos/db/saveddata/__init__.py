@@ -1,6 +1,7 @@
 __all__ = [
     "character",
     "fit",
+    "mutator",
     "module",
     "user",
     "skill",
@@ -12,7 +13,6 @@ __all__ = [
     "miscData",
     "targetResists",
     "override",
-    "crest",
     "implantSet",
     "loadDefaultDatabaseValues"
 ]

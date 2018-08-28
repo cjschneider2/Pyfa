@@ -87,7 +87,7 @@ class Ship(ItemAttrShortcut, HandledItem):
     def calculateModifiedAttributes(self, fit, runTime, forceProjected=False):
         if forceProjected:
             return
-        for effect in self.item.effects.itervalues():
+        for effect in self.item.effects.values():
             if effect.runTime == runTime and \
                     effect.isType("passive") and \
                     effect.activeByDefault:
@@ -131,7 +131,7 @@ class Ship(ItemAttrShortcut, HandledItem):
             return None
 
         items = []
-        g = eos.db.getGroup("Ship Modifiers", eager=("items.icon", "items.attributes"))
+        g = eos.db.getGroup("Ship Modifiers", eager=("items.attributes"))
         for item in g.items:
             # Rely on name detection because race is not reliable
             if item.name.lower().startswith(self.item.name.lower()):

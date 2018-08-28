@@ -11,7 +11,7 @@ from gui.builtinShipBrowser.shipItem import ShipItem
 from service.fit import Fit
 from service.market import Market
 
-import gui.builtinShipBrowser.events as events
+from gui.builtinShipBrowser.events import EVT_SB_IMPORT_SEL, EVT_SB_STAGE1_SEL, EVT_SB_STAGE2_SEL, EVT_SB_STAGE3_SEL, EVT_SB_SEARCH_SEL
 from gui.builtinShipBrowser.pfWidgetContainer import PFWidgetsContainer
 from gui.builtinShipBrowser.navigationPanel import NavigationPanel
 from gui.builtinShipBrowser.raceSelector import RaceSelector
@@ -50,7 +50,7 @@ class ShipBrowser(wx.Panel):
             if race:
                 self.racesFilter[race] = False
 
-        self.SetSizeHintsSz(wx.DefaultSize, wx.DefaultSize)
+        self.SetSizeHints(wx.DefaultSize, wx.DefaultSize)
 
         mainSizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -76,11 +76,11 @@ class ShipBrowser(wx.Panel):
         self.Show()
 
         self.Bind(wx.EVT_SIZE, self.SizeRefreshList)
-        self.Bind(events.EVT_SB_STAGE2_SEL, self.stage2)
-        self.Bind(events.EVT_SB_STAGE1_SEL, self.stage1)
-        self.Bind(events.EVT_SB_STAGE3_SEL, self.stage3)
-        self.Bind(events.EVT_SB_SEARCH_SEL, self.searchStage)
-        self.Bind(events.EVT_SB_IMPORT_SEL, self.importStage)
+        self.Bind(EVT_SB_STAGE2_SEL, self.stage2)
+        self.Bind(EVT_SB_STAGE1_SEL, self.stage1)
+        self.Bind(EVT_SB_STAGE3_SEL, self.stage3)
+        self.Bind(EVT_SB_SEARCH_SEL, self.searchStage)
+        self.Bind(EVT_SB_IMPORT_SEL, self.importStage)
 
         self.mainFrame.Bind(GE.FIT_CHANGED, self.RefreshList)
 
@@ -189,7 +189,7 @@ class ShipBrowser(wx.Panel):
         "amarr", "caldari", "gallente", "minmatar",
         "sisters", "ore",
         "serpentis", "angel", "blood", "sansha", "guristas", "mordu",
-        "jove", "upwell", None
+        "jove", "upwell", "triglavian", None
     ]
 
     def raceNameKey(self, ship):
@@ -214,12 +214,12 @@ class ShipBrowser(wx.Panel):
                 if ship.race not in racesList:
                     racesList.append(ship.race)
 
-        for race, state in self.racesFilter.iteritems():
+        for race, state in self.racesFilter.items():
             if race in racesList:
                 subRacesFilter[race] = self.racesFilter[race]
 
         override = True
-        for race, state in subRacesFilter.iteritems():
+        for race, state in subRacesFilter.items():
             if state:
                 override = False
                 break
@@ -236,10 +236,10 @@ class ShipBrowser(wx.Panel):
             if self.filterShipsWithNoFits:
                 if fits > 0:
                     if filter_:
-                        self.lpane.AddWidget(ShipItem(self.lpane, ship.ID, (ship.name, shipTrait, fits), ship.race))
+                        self.lpane.AddWidget(ShipItem(self.lpane, ship.ID, (ship.name, shipTrait, fits), ship.race, ship.graphicID))
             else:
                 if filter_:
-                    self.lpane.AddWidget(ShipItem(self.lpane, ship.ID, (ship.name, shipTrait, fits), ship.race))
+                    self.lpane.AddWidget(ShipItem(self.lpane, ship.ID, (ship.name, shipTrait, fits), ship.race, ship.graphicID))
 
         self.raceselect.RebuildRaces(racesList)
 
@@ -335,8 +335,8 @@ class ShipBrowser(wx.Panel):
 
         shipTrait = ship.traits.traitText if (ship.traits is not None) else ""  # empty string if no traits
 
-        for ID, name, booster, timestamp, notes in fitList:
-            self.lpane.AddWidget(FitItem(self.lpane, ID, (shipName, shipTrait, name, booster, timestamp, notes), shipID))
+        for ID, name, booster, timestamp, notes, graphicID in fitList:
+            self.lpane.AddWidget(FitItem(self.lpane, ID, (shipName, shipTrait, name, booster, timestamp, notes), shipID, graphicID=graphicID))
 
         self.lpane.RefreshList()
         self.lpane.Thaw()
@@ -374,7 +374,7 @@ class ShipBrowser(wx.Panel):
 
                 self.lpane.AddWidget(
                     ShipItem(self.lpane, ship.ID, (ship.name, shipTrait, len(sFit.getFitsWithShip(ship.ID))),
-                             ship.race))
+                             ship.race, ship.graphicID))
 
             for ID, name, shipID, shipName, booster, timestamp, notes in fitList:
                 ship = sMkt.getItem(shipID)
@@ -384,9 +384,9 @@ class ShipBrowser(wx.Panel):
 
                 shipTrait = ship.traits.traitText if (ship.traits is not None) else ""  # empty string if no traits
 
-                self.lpane.AddWidget(FitItem(self.lpane, ID, (shipName, shipTrait, name, booster, timestamp, notes), shipID))
+                self.lpane.AddWidget(FitItem(self.lpane, ID, (shipName, shipTrait, name, booster, timestamp, notes), shipID, graphicID=ship.graphicID))
             if len(ships) == 0 and len(fitList) == 0:
-                self.lpane.AddWidget(PFStaticText(self.lpane, label=u"No matching results."))
+                self.lpane.AddWidget(PFStaticText(self.lpane, label="No matching results."))
             self.lpane.RefreshList(doFocus=False)
         self.lpane.Thaw()
 
@@ -435,6 +435,7 @@ class ShipBrowser(wx.Panel):
                         fit[4]
                     ),
                     shipItem.ID,
+                    graphicID=shipItem.graphicID
                 ))
             self.lpane.RefreshList(doFocus=False)
         self.lpane.Thaw()

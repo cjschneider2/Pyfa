@@ -18,7 +18,7 @@
 # =============================================================================
 
 from gui.graph import Graph
-from gui.bitmapLoader import BitmapLoader
+from gui.bitmap_loader import BitmapLoader
 from eos.graph.fitDps import FitDpsGraph as FitDps
 from eos.graph import Data
 import gui.mainFrame
@@ -54,8 +54,8 @@ class FitDpsGraph(Graph):
     def getIcons(self):
         icons = {}
         sAttr = Attribute.getInstance()
-        for key, attrName in self.propertyAttributeMap.iteritems():
-            iconFile = sAttr.getAttributeInfo(attrName).icon.iconFile
+        for key, attrName in self.propertyAttributeMap.items():
+            iconFile = sAttr.getAttributeInfo(attrName).iconID
             bitmap = BitmapLoader.getBitmap(iconFile, "icons")
             if bitmap:
                 icons[key] = bitmap
@@ -69,7 +69,7 @@ class FitDpsGraph(Graph):
 
         fitDps.clearData()
         variable = None
-        for fieldName, value in fields.iteritems():
+        for fieldName, value in fields.items():
             d = Data(fieldName, value)
             if not d.isConstant():
                 if variable is None:

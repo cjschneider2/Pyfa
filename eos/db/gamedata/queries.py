@@ -17,15 +17,16 @@
 # along with eos.  If not, see <http://www.gnu.org/licenses/>.
 # ===============================================================================
 
-from sqlalchemy.orm import join, exc, aliased
+from sqlalchemy.orm import join, exc, aliased, joinedload, subqueryload
 from sqlalchemy.sql import and_, or_, select
+from sqlalchemy.inspection import inspect
 
 import eos.config
 from eos.db import gamedata_session
 from eos.db.gamedata.metaGroup import metatypes_table, items_table
 from eos.db.gamedata.group import groups_table
 from eos.db.util import processEager, processWhere
-from eos.gamedata import AlphaClone, Attribute, Category, Group, Item, MarketGroup, MetaGroup, AttributeInfo, MetaData
+from eos.gamedata import AlphaClone, Attribute, Category, Group, Item, MarketGroup, MetaGroup, AttributeInfo, MetaData, DynamicItem
 
 cache = {}
 configVal = getattr(eos.config, "gamedataCache", None)
@@ -81,7 +82,7 @@ def getItem(lookfor, eager=None):
             item = gamedata_session.query(Item).get(lookfor)
         else:
             item = gamedata_session.query(Item).options(*processEager(eager)).filter(Item.ID == lookfor).first()
-    elif isinstance(lookfor, basestring):
+    elif isinstance(lookfor, str):
         if lookfor in itemNameMap:
             id = itemNameMap[lookfor]
             if eager is None:
@@ -94,6 +95,36 @@ def getItem(lookfor, eager=None):
             itemNameMap[lookfor] = item.ID
     else:
         raise TypeError("Need integer or string as argument")
+    return item
+
+
+def getMutaplasmid(lookfor, eager=None):
+    if isinstance(lookfor, int):
+        item = gamedata_session.query(DynamicItem).filter(DynamicItem.ID == lookfor).first()
+    else:
+        raise TypeError("Need integer as argument")
+    return item
+
+
+def getItemWithBaseItemAttribute(lookfor, baseItemID, eager=None):
+    # A lot of this is described in more detail in #1597
+    item = gamedata_session.query(Item).get(lookfor)
+    base = getItem(baseItemID)
+
+    # we have to load all attributes for this object, otherwise we'll lose access to them when we expunge.
+    # todo: figure out a way to eagerly load all these via the query...
+    for x in [*inspect(Item).relationships.keys(), 'description']:
+        getattr(item, x)
+
+    # Copy over the attributes from the base, but ise the items attributes when there's an overlap
+    # WARNING: the attribute object still has the old typeID. I don't believe we access this typeID anywhere in the code,
+    # but should keep this in mind for now.
+    item._Item__attributes = {**base.attributes, **item.attributes}
+
+    # Expunge the item form the session. This is required to have different Abyssal / Base combinations loaded in memory.
+    # Without expunging it, once one Abyssal Web is created, SQLAlchmey will use it for all others. We don't want this,
+    # we want to generate a completely new object to work with
+    gamedata_session.expunge(item)
     return item
 
 
@@ -154,7 +185,7 @@ def getGroup(lookfor, eager=None):
             group = gamedata_session.query(Group).get(lookfor)
         else:
             group = gamedata_session.query(Group).options(*processEager(eager)).filter(Group.ID == lookfor).first()
-    elif isinstance(lookfor, basestring):
+    elif isinstance(lookfor, str):
         if lookfor in groupNameMap:
             id = groupNameMap[lookfor]
             if eager is None:
@@ -181,7 +212,7 @@ def getCategory(lookfor, eager=None):
         else:
             category = gamedata_session.query(Category).options(*processEager(eager)).filter(
                     Category.ID == lookfor).first()
-    elif isinstance(lookfor, basestring):
+    elif isinstance(lookfor, str):
         if lookfor in categoryNameMap:
             id = categoryNameMap[lookfor]
             if eager is None:
@@ -210,7 +241,7 @@ def getMetaGroup(lookfor, eager=None):
         else:
             metaGroup = gamedata_session.query(MetaGroup).options(*processEager(eager)).filter(
                     MetaGroup.ID == lookfor).first()
-    elif isinstance(lookfor, basestring):
+    elif isinstance(lookfor, str):
         if lookfor in metaGroupNameMap:
             id = metaGroupNameMap[lookfor]
             if eager is None:
@@ -245,7 +276,7 @@ def getMarketGroup(lookfor, eager=None):
 def getItemsByCategory(filter, where=None, eager=None):
     if isinstance(filter, int):
         filter = Category.ID == filter
-    elif isinstance(filter, basestring):
+    elif isinstance(filter, str):
         filter = Category.name == filter
     else:
         raise TypeError("Need integer or string as argument")
@@ -257,7 +288,7 @@ def getItemsByCategory(filter, where=None, eager=None):
 
 @cachedQuery(3, "where", "nameLike", "join")
 def searchItems(nameLike, where=None, join=None, eager=None):
-    if not isinstance(nameLike, basestring):
+    if not isinstance(nameLike, str):
         raise TypeError("Need string as argument")
 
     if join is None:
@@ -268,7 +299,7 @@ def searchItems(nameLike, where=None, join=None, eager=None):
 
     items = gamedata_session.query(Item).options(*processEager(eager)).join(*join)
     for token in nameLike.split(' '):
-        token_safe = u"%{0}%".format(sqlizeString(token))
+        token_safe = "%{0}%".format(sqlizeString(token))
         if where is not None:
             items = items.filter(and_(Item.name.like(token_safe, escape="\\"), where))
         else:
@@ -279,12 +310,12 @@ def searchItems(nameLike, where=None, join=None, eager=None):
 
 @cachedQuery(3, "where", "nameLike", "join")
 def searchSkills(nameLike, where=None, eager=None):
-    if not isinstance(nameLike, basestring):
+    if not isinstance(nameLike, str):
         raise TypeError("Need string as argument")
 
     items = gamedata_session.query(Item).options(*processEager(eager)).join(Item.group, Group.category)
     for token in nameLike.split(' '):
-        token_safe = u"%{0}%".format(sqlizeString(token))
+        token_safe = "%{0}%".format(sqlizeString(token))
         if where is not None:
             items = items.filter(and_(Item.name.like(token_safe, escape="\\"), Category.ID == 16, where))
         else:
@@ -322,7 +353,7 @@ def getVariations(itemids, groupIDs=None, where=None, eager=None):
 
 @cachedQuery(1, "attr")
 def getAttributeInfo(attr, eager=None):
-    if isinstance(attr, basestring):
+    if isinstance(attr, str):
         filter = AttributeInfo.name == attr
     elif isinstance(attr, int):
         filter = AttributeInfo.ID == attr
@@ -337,7 +368,7 @@ def getAttributeInfo(attr, eager=None):
 
 @cachedQuery(1, "field")
 def getMetaData(field):
-    if isinstance(field, basestring):
+    if isinstance(field, str):
         data = gamedata_session.query(MetaData).get(field)
     else:
         raise TypeError("Need string as argument")
@@ -361,13 +392,17 @@ def directAttributeRequest(itemIDs, attrIDs):
     return result
 
 
+def getAbyssalTypes():
+    return set([r.resultingTypeID for r in gamedata_session.query(DynamicItem.resultingTypeID).distinct()])
+
+
 def getRequiredFor(itemID, attrMapping):
     Attribute1 = aliased(Attribute)
     Attribute2 = aliased(Attribute)
 
     skillToLevelClauses = []
 
-    for attrSkill, attrLevel in attrMapping.iteritems():
+    for attrSkill, attrLevel in attrMapping.items():
         skillToLevelClauses.append(and_(Attribute1.attributeID == attrSkill, Attribute2.attributeID == attrLevel))
 
     queryOr = or_(*skillToLevelClauses)

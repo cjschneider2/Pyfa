@@ -1,7 +1,7 @@
 # noinspection PyPackageRequirements
 import wx
 
-from gui.bitmapLoader import BitmapLoader
+from gui.bitmap_loader import BitmapLoader
 
 
 class ItemDependents(wx.Panel):
@@ -19,7 +19,7 @@ class ItemDependents(wx.Panel):
 
         self.SetSizer(mainSizer)
         self.root = self.reqTree.AddRoot("WINRARZOR")
-        self.reqTree.SetPyData(self.root, None)
+        self.reqTree.SetItemData(self.root, None)
 
         self.imageList = wx.ImageList(16, 16)
         self.reqTree.SetImageList(self.imageList)
@@ -32,7 +32,7 @@ class ItemDependents(wx.Panel):
     def getFullSkillTree(self, parentSkill, parent, sbIconId):
         levelToItems = {}
 
-        for item, level in parentSkill.requiredFor.iteritems():
+        for item, level in parentSkill.requiredFor.items():
             if level not in levelToItems:
                 levelToItems[level] = []
             levelToItems[level].append(item)
@@ -44,8 +44,8 @@ class ItemDependents(wx.Panel):
             child = self.reqTree.AppendItem(parent, "Level {}".format(self.romanNb[int(x)]), sbIconId)
             for item in items:
 
-                if item.icon:
-                    bitmap = BitmapLoader.getBitmap(item.icon.iconFile, "icons")
+                if item.iconID:
+                    bitmap = BitmapLoader.getBitmap(item.iconID, "icons")
                     itemIcon = self.imageList.Add(bitmap) if bitmap else -1
                 else:
                     itemIcon = -1

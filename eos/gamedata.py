@@ -22,13 +22,10 @@ import re
 from sqlalchemy.orm import reconstructor
 
 import eos.db
-from eqBase import EqBase
+from .eqBase import EqBase
 from eos.saveddata.price import Price as types_Price
+from collections import OrderedDict
 
-try:
-    from collections import OrderedDict
-except ImportError:
-    from utils.compat import OrderedDict
 
 from logbook import Logger
 
@@ -160,8 +157,6 @@ class Effect(EqBase):
         if it doesn't, set dummy values and add a dummy handler
         """
 
-        pyfalog.debug("Generate effect handler for {}".format(self.name))
-
         try:
             self.__effectModule = effectModule = __import__('eos.effects.' + self.handlerName, fromlist=True)
             self.__handler = getattr(effectModule, "handler", effectDummy)
@@ -213,6 +208,8 @@ class Item(EqBase):
 
     MOVE_ATTR_INFO = None
 
+    ABYSSAL_TYPES = None
+
     @classmethod
     def getMoveAttrInfo(cls):
         info = getattr(cls, "MOVE_ATTR_INFO", None)
@@ -258,7 +255,7 @@ class Item(EqBase):
             return default
 
     def isType(self, type):
-        for effect in self.effects.itervalues():
+        for effect in self.effects.values():
             if effect.isType(type):
                 return True
 
@@ -299,7 +296,7 @@ class Item(EqBase):
             self.__requiredSkills = requiredSkills
             # Map containing attribute IDs we may need for required skills
             # { requiredSkillX : requiredSkillXLevel }
-            combinedAttrIDs = set(self.srqIDMap.iterkeys()).union(set(self.srqIDMap.itervalues()))
+            combinedAttrIDs = set(self.srqIDMap.keys()).union(set(self.srqIDMap.values()))
             # Map containing result of the request
             # { attributeID : attributeValue }
             skillAttrs = {}
@@ -309,7 +306,7 @@ class Item(EqBase):
                 attrVal = attrInfo[2]
                 skillAttrs[attrID] = attrVal
             # Go through all attributeID pairs
-            for srqIDAtrr, srqLvlAttr in self.srqIDMap.iteritems():
+            for srqIDAtrr, srqLvlAttr in self.srqIDMap.items():
                 # Check if we have both in returned result
                 if srqIDAtrr in skillAttrs and srqLvlAttr in skillAttrs:
                     skillID = int(skillAttrs[srqIDAtrr])
@@ -377,13 +374,14 @@ class Item(EqBase):
                     12 : "sisters",  # Amarr + Gallente
                     16 : "jove",
                     32 : "sansha",  # Incrusion Sansha
-                    128: "ore"
+                    128: "ore",
+                    135: "triglavian"
                 }
                 # Race is None by default
                 race = None
                 # Check primary and secondary required skills' races
                 if race is None:
-                    skillRaces = tuple(filter(lambda rid: rid, (s.raceID for s in tuple(self.requiredSkills.keys()))))
+                    skillRaces = tuple([rid for rid in (s.raceID for s in tuple(self.requiredSkills.keys())) if rid])
                     if sum(skillRaces) in map:
                         race = map[sum(skillRaces)]
                         if race == "angelserp":
@@ -405,7 +403,7 @@ class Item(EqBase):
         if self.__assistive is None:
             assistive = False
             # Go through all effects and find first assistive
-            for effect in self.effects.itervalues():
+            for effect in self.effects.values():
                 if effect.isAssistance is True:
                     # If we find one, stop and mark item as assistive
                     assistive = True
@@ -420,7 +418,7 @@ class Item(EqBase):
         if self.__offensive is None:
             offensive = False
             # Go through all effects and find first offensive
-            for effect in self.effects.itervalues():
+            for effect in self.effects.values():
                 if effect.isOffensive is True:
                     # If we find one, stop and mark item as offensive
                     offensive = True
@@ -429,8 +427,8 @@ class Item(EqBase):
         return self.__offensive
 
     def requiresSkill(self, skill, level=None):
-        for s, l in self.requiredSkills.iteritems():
-            if isinstance(skill, basestring):
+        for s, l in self.requiredSkills.items():
+            if isinstance(skill, str):
                 if s.name == skill and (level is None or l == level):
                     return True
 
@@ -467,8 +465,19 @@ class Item(EqBase):
 
         return self.__price
 
+    @property
+    def isAbyssal(self):
+        if Item.ABYSSAL_TYPES is None:
+            Item.getAbyssalYypes()
+
+        return self.ID in Item.ABYSSAL_TYPES
+
+    @classmethod
+    def getAbyssalYypes(cls):
+        cls.ABYSSAL_TYPES = eos.db.getAbyssalTypes()
+
     def __repr__(self):
-        return u"Item(ID={}, name={}) at {}".format(
+        return "Item(ID={}, name={}) at {}".format(
                 self.ID, self.name, hex(id(self))
         )
 
@@ -516,15 +525,23 @@ class Group(EqBase):
     pass
 
 
-class Icon(EqBase):
+class DynamicItem(EqBase):
+    pass
+
+
+class DynamicItemAttribute(EqBase):
+    pass
+
+
+class DynamicItemItem(EqBase):
     pass
 
 
 class MarketGroup(EqBase):
     def __repr__(self):
-        return u"MarketGroup(ID={}, name={}, parent={}) at {}".format(
+        return "MarketGroup(ID={}, name={}, parent={}) at {}".format(
                 self.ID, self.name, getattr(self.parent, "name", None), self.name, hex(id(self))
-        ).encode('utf8')
+        )
 
 
 class MetaGroup(EqBase):
@@ -536,7 +553,101 @@ class MetaType(EqBase):
 
 
 class Unit(EqBase):
-    pass
+
+    def __init__(self):
+        self.name = None
+        self.displayName = None
+
+    @property
+    def translations(self):
+        """ This is a mapping of various tweaks that we have to do between the internal representation of an attribute
+        value and the display (for example, 'Millisecond' units have the display name of 's', so we have to convert value
+        from ms to s) """
+        return {
+            "Inverse Absolute Percent": (
+                lambda v: (1 - v) * 100,
+                lambda d: -1 * (d / 100) + 1,
+                lambda u: u),
+            "Inversed Modifier Percent": (
+                lambda v: (1 - v) * 100,
+                lambda d: -1 * (d / 100) + 1,
+                lambda u: u),
+            "Modifier Percent": (
+                lambda v: ("%+.2f" if ((v - 1) * 100) % 1 else "%+d") % ((v - 1) * 100),
+                lambda d: (d / 100) + 1,
+                lambda u: u),
+            "Volume": (
+                lambda v: v,
+                lambda d: d,
+                lambda u: "m³"),
+            "Sizeclass": (
+                lambda v: v,
+                lambda d: d,
+                lambda u: ""),
+            "Absolute Percent": (
+                lambda v: (v * 100),
+                lambda d: d / 100,
+                lambda u: u),
+            "Milliseconds": (
+                lambda v: v / 1000.0,
+                lambda d: d * 1000.0,
+                lambda u: u),
+            "Boolean": (
+                lambda v: "Yes" if v == 1 else "No",
+                lambda d: 1.0 if d == "Yes" else 0.0,
+                lambda u: ""),
+            "typeID": (
+                self.itemIDCallback,
+                None,  # we could probably convert these back if we really tried hard enough
+                lambda u: ""),
+            "groupID": (
+                self.groupIDCallback,
+                None,
+                lambda u: ""),
+            "attributeID": (
+                self.attributeIDCallback,
+                None,
+                lambda u: ""),
+        }
+
+    @staticmethod
+    def itemIDCallback(v):
+        v = int(v)
+        item = eos.db.getItem(int(v))
+        return "%s (%d)" % (item.name, v) if item is not None else str(v)
+
+    @staticmethod
+    def groupIDCallback(v):
+        v = int(v)
+        group = eos.db.getGroup(v)
+        return "%s (%d)" % (group.name, v) if group is not None else str(v)
+
+    @staticmethod
+    def attributeIDCallback(v):
+        v = int(v)
+        if not v:  # some attributes come through with a value of 0? See #1387
+            return "%d" % (v)
+        attribute = eos.db.getAttributeInfo(v, eager=("unit"))
+        return "%s (%d)" % (attribute.name.capitalize(), v)
+
+    def TranslateValue(self, value):
+        """Attributes have to be translated certain ways based on their unit (ex: decimals converting to percentages).
+        This allows us to get an easy representation of how the attribute should be printed """
+
+        override = self.translations.get(self.name)
+        if override is not None:
+            return override[0](value), override[2](self.displayName)
+
+        return value, self.displayName
+
+    def ComplicateValue(self, value):
+        """Takes the display value and turns it back into the internal representation of it"""
+
+        override = self.translations.get(self.name)
+        if override is not None:
+            return override[1](value)
+
+        return value
 
 
 class Traits(EqBase):

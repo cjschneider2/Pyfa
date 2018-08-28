@@ -47,7 +47,7 @@ class ItemStats(ContextMenu):
         mstate = wx.GetMouseState()
         reuse = False
 
-        if mstate.CmdDown():
+        if mstate.cmdDown:
             reuse = True
 
         if self.mainFrame.GetActiveStatsWindow() is None and reuse:
@@ -63,7 +63,7 @@ class ItemStats(ContextMenu):
                 size = wx.DefaultSize
                 pos = wx.DefaultPosition
             ItemStatsDialog(stuff, fullContext, pos, size, maximized)
-            lastWnd.closeEvent(None)
+            lastWnd.Close()
 
         else:
             ItemStatsDialog(stuff, fullContext)

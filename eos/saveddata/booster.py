@@ -116,7 +116,7 @@ class Booster(HandledItem, ItemAttrShortcut):
         if not self.active:
             return
 
-        for effect in self.item.effects.itervalues():
+        for effect in self.item.effects.values():
             if effect.runTime == runTime and \
                     (effect.isType("passive") or effect.isType("boosterSideEffect")):
                 if effect.isType("boosterSideEffect") and effect not in self.activeSideEffectEffects:
@@ -142,14 +142,8 @@ class Booster(HandledItem, ItemAttrShortcut):
         copy = Booster(self.item)
         copy.active = self.active
 
-        # Legacy booster side effect code, disabling as not currently implemented
-        '''
-        origSideEffects = list(self.iterSideEffects())
-        copySideEffects = list(copy.iterSideEffects())
-        i = 0
-        while i < len(origSideEffects):
-            copySideEffects[i].active = origSideEffects[i].active
-            i += 1
-        '''
+        for sideEffect in self.sideEffects:
+            copyEffect = next(filter(lambda eff: eff.effectID == sideEffect.effectID, copy.sideEffects))
+            copyEffect.active = sideEffect.active
 
         return copy

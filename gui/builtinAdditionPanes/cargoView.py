@@ -28,12 +28,12 @@ from service.fit import Fit
 from service.market import Market
 
 
-class CargoViewDrop(wx.PyDropTarget):
+class CargoViewDrop(wx.DropTarget):
     def __init__(self, dropFn, *args, **kwargs):
         super(CargoViewDrop, self).__init__(*args, **kwargs)
         self.dropFn = dropFn
         # this is really transferring an EVE itemID
-        self.dropData = wx.PyTextDataObject()
+        self.dropData = wx.TextDataObject()
         self.SetDataObject(self.dropData)
 
     def OnData(self, x, y, t):
@@ -88,7 +88,7 @@ class CargoView(d.Display):
         row = event.GetIndex()
 
         if row != -1:
-            data = wx.PyTextDataObject()
+            data = wx.TextDataObject()
             dataStr = "cargo:" + str(row)
             data.SetText(dataStr)
 
@@ -118,15 +118,24 @@ class CargoView(d.Display):
         # Gather module information to get position
         module = fit.modules[modIdx]
 
+        if module.item.isAbyssal:
+            dlg = wx.MessageDialog(self,
+               "Moving this Abyssal module to the cargo will convert it to the base module. Do you wish to proceed?",
+               "Confirm", wx.YES_NO | wx.ICON_QUESTION)
+            result = dlg.ShowModal() == wx.ID_YES
+
+            if not result:
+                return
+
         if dstRow != -1:  # we're swapping with cargo
-            if mstate.CmdDown():  # if copying, append to cargo
-                sFit.addCargo(self.mainFrame.getActiveFit(), module.item.ID)
+            if mstate.cmdDown:  # if copying, append to cargo
+                sFit.addCargo(self.mainFrame.getActiveFit(), module.item.ID if not module.item.isAbyssal else module.baseItemID)
             else:  # else, move / swap
                 sFit.moveCargoToModule(self.mainFrame.getActiveFit(), module.position, dstRow)
         else:  # dragging to blank spot, append
-            sFit.addCargo(self.mainFrame.getActiveFit(), module.item.ID)
+            sFit.addCargo(self.mainFrame.getActiveFit(), module.item.ID if not module.item.isAbyssal else module.baseItemID)
 
-            if not mstate.CmdDown():  # if not copying, remove module
+            if not mstate.cmdDown:  # if not copying, remove module
                 sFit.removeModule(self.mainFrame.getActiveFit(), module.position)
 
         wx.PostEvent(self.mainFrame, GE.FitChanged(fitID=self.mainFrame.getActiveFit(), action="moddel", typeID=module.item.ID))

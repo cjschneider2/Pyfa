@@ -20,7 +20,8 @@
 import re
 import threading
 from logbook import Logger
-import Queue
+import queue
+from itertools import chain
 
 # noinspection PyPackageRequirements
 import wx
@@ -30,15 +31,11 @@ import config
 import eos.db
 from service import conversions
 from service.settings import SettingsProvider
+from service.jargon import JargonLoader
 
 from eos.gamedata import Category as types_Category, Group as types_Group, Item as types_Item, MarketGroup as types_MarketGroup, \
     MetaGroup as types_MetaGroup, MetaType as types_MetaType
-
-
-try:
-    from collections import OrderedDict
-except ImportError:
-    from utils.compat import OrderedDict
+from collections import OrderedDict
 
 pyfalog = Logger(__name__)
 
@@ -53,7 +50,7 @@ class ShipBrowserWorkerThread(threading.Thread):
         self.name = "ShipBrowser"
 
     def run(self):
-        self.queue = Queue.Queue()
+        self.queue = queue.Queue()
         self.cache = {}
         # Wait for full market initialization (otherwise there's high risky
         # this thread will attempt to init Market which is already being inited)
@@ -88,7 +85,10 @@ class SearchWorkerThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.name = "SearchWorker"
-        pyfalog.debug("Initialize SearchWorkerThread.")
+        self.jargonLoader = JargonLoader.instance()
+        # load the jargon while in an out-of-thread context, to spot any problems while in the main thread
+        self.jargonLoader.get_jargon()
+        self.jargonLoader.get_jargon().apply('test string')
 
     def run(self):
         self.cv = threading.Condition()
@@ -115,13 +115,23 @@ class SearchWorkerThread(threading.Thread):
             else:
                 filter_ = None
 
-            results = eos.db.searchItems(request, where=filter_,
-                                         join=(types_Item.group, types_Group.category),
-                                         eager=("icon", "group.category", "metaGroup", "metaGroup.parent"))
+            jargon_request = self.jargonLoader.get_jargon().apply(request)
+
+            results = []
+            if len(request) >= config.minItemSearchLength:
+                results = eos.db.searchItems(request, where=filter_,
+                                             join=(types_Item.group, types_Group.category),
+                                             eager=("group.category", "metaGroup", "metaGroup.parent"))
+
+            jargon_results = []
+            if len(jargon_request) >= config.minItemSearchLength:
+                jargon_results = eos.db.searchItems(jargon_request, where=filter_,
+                                             join=(types_Item.group, types_Group.category),
+                                             eager=("group.category", "metaGroup", "metaGroup.parent"))
 
             items = set()
             # Return only published items, consult with Market service this time
-            for item in results:
+            for item in [*results, *jargon_results]:
                 if sMkt.getPublicityByItem(item):
                     items.add(item)
             wx.CallAfter(callback, items)
@@ -259,7 +269,7 @@ class Market(object):
         }
         # Parent type name: set(item names)
         self.ITEMS_FORCEDMETAGROUP_R = {}
-        for item, value in self.ITEMS_FORCEDMETAGROUP.items():
+        for item, value in list(self.ITEMS_FORCEDMETAGROUP.items()):
             parent = value[1]
             if parent not in self.ITEMS_FORCEDMETAGROUP_R:
                 self.ITEMS_FORCEDMETAGROUP_R[parent] = set()
@@ -267,15 +277,8 @@ class Market(object):
         # Dictionary of items with forced market group (service assumes they have no
         # market group assigned in db, otherwise they'll appear in both original and forced groups)
         self.ITEMS_FORCEDMARKETGROUP = {
-            "Advanced Cerebral Accelerator"             : 977,  # Implants & Boosters > Booster
-            "Civilian Damage Control"                   : 615,  # Ship Equipment > Hull & Armor > Damage Controls
-            "Civilian EM Ward Field"                    : 1695,
-            # Ship Equipment > Shield > Shield Hardeners > EM Shield Hardeners
-            "Civilian Explosive Deflection Field"       : 1694,
-            # Ship Equipment > Shield > Shield Hardeners > Explosive Shield Hardeners
+            "Advanced Cerebral Accelerator"             : 2487,  # Implants & Boosters > Booster > Cerebral Accelerators
             "Civilian Hobgoblin"                        : 837,  # Drones > Combat Drones > Light Scout Drones
-            "Civilian Kinetic Deflection Field"         : 1693,
-            # Ship Equipment > Shield > Shield Hardeners > Kinetic Shield Hardeners
             "Civilian Light Missile Launcher"           : 640,
             # Ship Equipment > Turrets & Bays > Missile Launchers > Light Missile Launchers
             "Civilian Scourge Light Missile"            : 920,
@@ -283,8 +286,6 @@ class Market(object):
             "Civilian Small Remote Armor Repairer"      : 1059,
             # Ship Equipment > Hull & Armor > Remote Armor Repairers > Small
             "Civilian Small Remote Shield Booster"      : 603,  # Ship Equipment > Shield > Remote Shield Boosters > Small
-            "Civilian Stasis Webifier"                  : 683,  # Ship Equipment > Electronic Warfare > Stasis Webifiers
-            "Civilian Warp Disruptor"                   : 1935,  # Ship Equipment > Electronic Warfare > Warp Disruptors
             "Hardwiring - Zainou 'Sharpshooter' ZMX10"  : 1493,
             # Implants & Boosters > Implants > Skill Hardwiring > Missile Implants > Implant Slot 06
             "Hardwiring - Zainou 'Sharpshooter' ZMX100" : 1493,
@@ -297,11 +298,9 @@ class Market(object):
             # Implants & Boosters > Implants > Skill Hardwiring > Missile Implants > Implant Slot 06
             "Hardwiring - Zainou 'Sharpshooter' ZMX1100": 1493,
             # Implants & Boosters > Implants > Skill Hardwiring > Missile Implants > Implant Slot 06
-            "Nugoehuvi Synth Blue Pill Booster"         : 977,  # Implants & Boosters > Booster
-            "Prototype Cerebral Accelerator"            : 977,  # Implants & Boosters > Booster
+            "Prototype Cerebral Accelerator"            : 2487,  # Implants & Boosters > Booster > Cerebral Accelerators
             "Prototype Iris Probe Launcher"             : 712,  # Ship Equipment > Turrets & Bays > Scan Probe Launchers
-            "Shadow"                                    : 1310,  # Drones > Combat Drones > Fighter Bombers
-            "Standard Cerebral Accelerator"             : 977,  # Implants & Boosters > Booster
+            "Standard Cerebral Accelerator"             : 2487,  # Implants & Boosters > Booster > Cerebral Accelerators
         }
 
         self.ITEMS_FORCEDMARKETGROUP_R = self.__makeRevDict(self.ITEMS_FORCEDMARKETGROUP)
@@ -309,6 +308,7 @@ class Market(object):
         self.FORCEDMARKETGROUP = {
             685: False,  # Ship Equipment > Electronic Warfare > ECCM
             681: False,  # Ship Equipment > Electronic Warfare > Sensor Backup Arrays
+            1639: False  # Ship Equipment > Fleet Assistance > Command Processors
         }
 
         # Misc definitions
@@ -352,7 +352,7 @@ class Market(object):
     def __makeRevDict(orig):
         """Creates reverse dictionary"""
         rev = {}
-        for item, value in orig.items():
+        for item, value in list(orig.items()):
             if value not in rev:
                 rev[value] = set()
             rev[value].add(item)
@@ -366,7 +366,7 @@ class Market(object):
                 item = identity
             elif isinstance(identity, int):
                 item = eos.db.getItem(identity, *args, **kwargs)
-            elif isinstance(identity, basestring):
+            elif isinstance(identity, str):
                 # We normally lookup with string when we are using import/export
                 # features. Check against overrides
                 identity = conversions.all.get(identity, identity)
@@ -387,7 +387,7 @@ class Market(object):
         """Get group by its ID or name"""
         if isinstance(identity, types_Group):
             return identity
-        elif isinstance(identity, (int, float, basestring)):
+        elif isinstance(identity, (int, float, str)):
             if isinstance(identity, float):
                 identity = int(identity)
             # Check custom groups
@@ -406,7 +406,7 @@ class Market(object):
         """Get category by its ID or name"""
         if isinstance(identity, types_Category):
             category = identity
-        elif isinstance(identity, (int, basestring)):
+        elif isinstance(identity, (int, str)):
             category = eos.db.getCategory(identity, *args, **kwargs)
         elif isinstance(identity, float):
             id_ = int(identity)
@@ -420,7 +420,7 @@ class Market(object):
         """Get meta group by its ID or name"""
         if isinstance(identity, types_MetaGroup):
             metaGroup = identity
-        elif isinstance(identity, (int, basestring)):
+        elif isinstance(identity, (int, str)):
             metaGroup = eos.db.getMetaGroup(identity, *args, **kwargs)
         elif isinstance(identity, float):
             id_ = int(identity)
@@ -527,7 +527,7 @@ class Market(object):
         categories = ['Drone', 'Fighter', 'Implant']
 
         for item in items:
-            if item.category.ID == 20:  # Implants and Boosters
+            if item.category.ID == 20 and item.group.ID != 303:  # Implants not Boosters
                 implant_remove_list = set()
                 implant_remove_list.add("Low-Grade ")
                 implant_remove_list.add("Low-grade ")
@@ -541,15 +541,6 @@ class Market(object):
                 implant_remove_list.add(" - Elite")
                 implant_remove_list.add(" - Improved")
                 implant_remove_list.add(" - Standard")
-                implant_remove_list.add("Copper ")
-                implant_remove_list.add("Gold ")
-                implant_remove_list.add("Silver ")
-                implant_remove_list.add("Advanced ")
-                implant_remove_list.add("Improved ")
-                implant_remove_list.add("Prototype ")
-                implant_remove_list.add("Standard ")
-                implant_remove_list.add("Strong ")
-                implant_remove_list.add("Synth ")
 
                 for implant_prefix in ("-6", "-7", "-8", "-9", "-10"):
                     for i in range(50):
@@ -585,12 +576,22 @@ class Market(object):
             if trimmed_variations_list:
                 variations_list = trimmed_variations_list
 
+        # If the items are boosters then filter variations to only include boosters for the same slot.
+        BOOSTER_GROUP_ID = 303
+        if all(map(lambda i: i.group.ID == BOOSTER_GROUP_ID, items)) and len(items) > 0:
+            # 'boosterness' is the database's attribute name for Booster Slot
+            reqSlot = next(items.__iter__()).getAttribute('boosterness')
+            # If the item and it's variation both have a marketGroupID it should match for the variation to be considered valid.
+            marketGroupID = [next(filter(None, map(lambda i: i.marketGroupID, items)), None), None]
+            matchSlotAndMktGrpID = lambda v: v.getAttribute('boosterness') == reqSlot and v.marketGroupID in marketGroupID
+            variations_list = list(filter(matchSlotAndMktGrpID, variations_list))
+
         variations.update(variations_list)
         return variations
 
     def getGroupsByCategory(self, cat):
         """Get groups from given category"""
-        groups = set(filter(lambda grp: self.getPublicityByGroup(grp), cat.groups))
+        groups = set([grp for grp in cat.groups if self.getPublicityByGroup(grp)])
 
         return groups
 
@@ -610,7 +611,7 @@ class Market(object):
         if hasattr(group, 'addItems'):
             groupItems.update(group.addItems)
         items = set(
-                filter(lambda item: self.getPublicityByItem(item) and self.getGroupByItem(item) == group, groupItems))
+                [item for item in groupItems if self.getPublicityByItem(item) and self.getGroupByItem(item) == group])
         return items
 
     def getItemsByMarketGroup(self, mg, vars_=True):
@@ -640,12 +641,18 @@ class Market(object):
         else:
             result = baseitms
         # Get rid of unpublished items
-        result = set(filter(lambda item_: self.getPublicityByItem(item_), result))
+        result = set([item_ for item_ in result if self.getPublicityByItem(item_)])
         return result
 
     def marketGroupHasTypesCheck(self, mg):
         """If market group has any items, return true"""
         if mg and mg.ID in self.ITEMS_FORCEDMARKETGROUP_R:
+            # This shouldn't occur normally but makes errors more mild when ITEMS_FORCEDMARKETGROUP is outdated.
+            if len(mg.children) > 0 and len(mg.items) == 0:
+                pyfalog.error(("Market group \"{0}\" contains no items and has children. "
+                    "ITEMS_FORCEDMARKETGROUP is likely outdated and will need to be "
+                    "updated for {1} to display correctly.").format(mg, self.ITEMS_FORCEDMARKETGROUP_R[mg.ID]))
+                return False
             return True
         elif len(mg.items) > 0:
             return True
@@ -665,8 +672,8 @@ class Market(object):
 
     def getIconByMarketGroup(self, mg):
         """Return icon associated to marketgroup"""
-        if mg.icon:
-            return mg.icon.iconFile
+        if mg.iconID:
+            return mg.iconID
         else:
             while mg and not mg.hasTypes:
                 mg = mg.parent
@@ -681,7 +688,7 @@ class Market(object):
                 except KeyError:
                     return ""
 
-                return item.icon.iconFile if item.icon else ""
+                return item.iconID if item.icon else ""
             elif self.getMarketGroupChildren(mg) > 0:
                 kids = self.getMarketGroupChildren(mg)
                 mktGroups = self.getIconByMarketGroup(kids)
@@ -714,7 +721,7 @@ class Market(object):
         """
         root = set()
         for id_ in self.ROOT_MARKET_GROUPS:
-            mg = self.getMarketGroup(id_, eager="icon")
+            mg = self.getMarketGroup(id_)
             root.add(mg)
 
         return root
@@ -741,7 +748,7 @@ class Market(object):
         filter_ = types_Category.name.in_(["Ship", "Structure"])
         results = eos.db.searchItems(name, where=filter_,
                                      join=(types_Item.group, types_Group.category),
-                                     eager=("icon", "group.category", "metaGroup", "metaGroup.parent"))
+                                     eager=("group.category", "metaGroup", "metaGroup.parent"))
         ships = set()
         for item in results:
             if self.getPublicityByItem(item):
@@ -767,11 +774,11 @@ class Market(object):
     @staticmethod
     def directAttrRequest(items, attribs):
         try:
-            itemIDs = tuple(map(lambda i: i.ID, items))
+            itemIDs = tuple([i.ID for i in items])
         except TypeError:
             itemIDs = (items.ID,)
         try:
-            attrIDs = tuple(map(lambda i: i.ID, attribs))
+            attrIDs = tuple([i.ID for i in attribs])
         except TypeError:
             attrIDs = (attribs.ID,)
         info = {}
@@ -787,53 +794,5 @@ class Market(object):
 
     def filterItemsByMeta(self, items, metas):
         """Filter items by meta lvl"""
-        filtered = set(filter(lambda item: self.getMetaGroupIdByItem(item) in metas, items))
+        filtered = set([item for item in items if self.getMetaGroupIdByItem(item) in metas])
         return filtered
-
-    def getSystemWideEffects(self):
-        """
-        Get dictionary with system-wide effects
-        """
-        # Container for system-wide effects
-        effects = {}
-        # Expressions for matching when detecting effects we're looking for
-        validgroups = ("Black Hole Effect Beacon",
-                       "Cataclysmic Variable Effect Beacon",
-                       "Magnetar Effect Beacon",
-                       "Pulsar Effect Beacon",
-                       "Red Giant Beacon",
-                       "Wolf Rayet Effect Beacon",
-                       "Incursion ship attributes effects")
-        # Stuff we don't want to see in names
-        garbages = ("Effect", "Beacon", "ship attributes effects")
-        # Get group with all the system-wide beacons
-        grp = self.getGroup("Effect Beacon")
-        beacons = self.getItemsByGroup(grp)
-        # Cycle through them
-        for beacon in beacons:
-            # Check if it belongs to any valid group
-            for group in validgroups:
-                # Check beginning of the name only
-                if re.match(group, beacon.name):
-                    # Get full beacon name
-                    beaconname = beacon.name
-                    for garbage in garbages:
-                        beaconname = re.sub(garbage, "", beaconname)
-                    beaconname = re.sub(" {2,}", " ", beaconname).strip()
-                    # Get short name
-                    shortname = re.sub(group, "", beacon.name)
-                    for garbage in garbages:
-                        shortname = re.sub(garbage, "", shortname)
-                    shortname = re.sub(" {2,}", " ", shortname).strip()
-                    # Get group name
-                    groupname = group
-                    for garbage in garbages:
-                        groupname = re.sub(garbage, "", groupname)
-                    groupname = re.sub(" {2,}", " ", groupname).strip()
-                    # Add stuff to dictionary
-                    if groupname not in effects:
-                        effects[groupname] = set()
-                    effects[groupname].add((beacon, beaconname, shortname))
-                    # Break loop on 1st result
-                    break
-        return effects
