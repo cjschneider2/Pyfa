@@ -45,10 +45,13 @@ class Price(ViewColumn):
             if stuff.isEmpty:
                 return ""
 
-        price = stuff.item.price.price
+        price = stuff.item.price
 
-        if not price:
-            return ""
+        if not price or not price.isValid:
+            return False
+
+        # Fetch actual price as float to not modify its value on Price object
+        price = price.price
 
         if isinstance(stuff, Drone) or isinstance(stuff, Cargo):
             price *= stuff.amount
@@ -59,7 +62,7 @@ class Price(ViewColumn):
         sPrice = ServicePrice.getInstance()
 
         def callback(item):
-            price = item.item.price
+            price = item[0]
             text = formatAmount(price.price, 3, 3, 9, currency=True) if price.price else ""
             if price.failed:
                 text += " (!)"

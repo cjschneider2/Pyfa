@@ -3,13 +3,12 @@
 # noinspection PyPackageRequirements
 import wx
 
-from service.fit import Fit
-from service.market import Market
-from eos.saveddata.module import Hardpoint
+import gui.fitCommands as cmd
 import gui.mainFrame
-import gui.globalEvents as GE
-from gui.contextMenu import ContextMenu
+from eos.saveddata.module import Hardpoint
 from gui.bitmap_loader import BitmapLoader
+from gui.contextMenu import ContextMenu
+from service.market import Market
 from service.settings import ContextMenuSettings
 
 
@@ -195,7 +194,7 @@ class ModuleAmmoPicker(ContextMenu):
 
                     type_ = currType
                     item = wx.MenuItem(m, wx.ID_ANY, type_.capitalize())
-                    bitmap = BitmapLoader.getBitmap("%s_small" % type, "gui")
+                    bitmap = BitmapLoader.getBitmap("%s_small" % type_, "gui")
                     if bitmap is not None:
                         item.SetBitmap(bitmap)
 
@@ -228,11 +227,8 @@ class ModuleAmmoPicker(ContextMenu):
             event.Skip()
             return
 
-        sFit = Fit.getInstance()
         fitID = self.mainFrame.getActiveFit()
-
-        sFit.setAmmo(fitID, charge.ID if charge is not None else None, self.modules)
-        wx.PostEvent(self.mainFrame, GE.FitChanged(fitID=fitID))
+        self.mainFrame.command.Submit(cmd.GuiModuleAddChargeCommand(fitID, charge.ID if charge is not None else None, self.modules))
 
 
 ModuleAmmoPicker.register()
